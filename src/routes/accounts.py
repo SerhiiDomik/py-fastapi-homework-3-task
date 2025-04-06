@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -20,7 +20,7 @@ from database.validators.accounts import (
     validate_email,
     validate_password_strength,
 )
-from exceptions.security import InvalidTokenError
+from exceptions.security import InvalidTokenError, TokenExpiredError
 from schemas.accounts import (
     LoginResponseSchema,
     PasswordResetCompleteRequestSchema,
@@ -72,7 +72,6 @@ async def register_user(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"A user with this email {user_data.email} already exists.",
         )
-    validate_password_strength(user_data.password)
 
     try:
         user = UserModel(
@@ -89,8 +88,8 @@ async def register_user(
 
         await db.commit()
 
-        return RegistrationResponseSchema.from_orm(user)
-    except Exception as e:
+        return RegistrationResponseSchema.model_validate(user)
+    except Exception:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -199,7 +198,6 @@ async def complete_password_reset(
         token_record = result.scalar_one_or_none()
 
         if not token_record:
-            # Delete any existing tokens for this email if the token is invalid
             await db.execute(
                 delete(PasswordResetTokenModel).where(
                     PasswordResetTokenModel.user.has(email=reset_data.email)
@@ -268,11 +266,9 @@ async def login_user(
             detail="User account is not activated.",
         )
 
-    # Create tokens with user data as a dictionary
     jwt_access_token = jwt_manager.create_access_token({"user_id": user.id})
     jwt_refresh_token = jwt_manager.create_refresh_token({"user_id": user.id})
 
-    # Create and store the new refresh token
     try:
         refresh_token = RefreshTokenModel.create(
             user_id=user.id,
@@ -302,7 +298,6 @@ async def refresh_access_token(
     db: AsyncSession = Depends(get_db),
     jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager),
 ):
-
     try:
         payload = jwt_manager.decode_refresh_token(refresh_data.refresh_token)
         user_id = payload.get("user_id")
@@ -310,6 +305,11 @@ async def refresh_access_token(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
+        )
+    except TokenExpiredError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token has expired.",
         )
 
     result = await db.execute(
@@ -332,6 +332,6 @@ async def refresh_access_token(
             detail="User not found.",
         )
 
-    access_token = jwt_manager.create_access_token(user_id)
+    access_token = jwt_manager.create_access_token({"user_id": user_id})
 
     return TokenRefreshResponseSchema(access_token=access_token)
