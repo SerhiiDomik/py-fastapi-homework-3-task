@@ -93,7 +93,7 @@ async def register_user(
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred during user creation.",
+            detail="An error occurred during user creation.",
         )
 
 
@@ -150,7 +150,7 @@ async def request_password_reset(
 
     result = await db.execute(
         select(UserModel).where(
-            UserModel.email == request_data.email, UserModel.is_active == True
+            UserModel.email == request_data.email, UserModel.is_active
         )
     )
     user = result.scalar_one_or_none()
