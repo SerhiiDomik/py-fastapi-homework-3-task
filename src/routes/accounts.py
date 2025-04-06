@@ -178,14 +178,6 @@ async def complete_password_reset(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        validate_password_strength(reset_data.password)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(e),
-        )
-
-    try:
         result = await db.execute(
             select(PasswordResetTokenModel)
             .options(joinedload(PasswordResetTokenModel.user))
